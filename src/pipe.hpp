@@ -1,7 +1,7 @@
 #include <functional>
-#include <optional>
+#include <list>
 
-template<class T, class I, class O>
+template<class T, class I, std::size_t IN, class O>
 class pipe
 {
 public:
@@ -10,13 +10,29 @@ public:
     {
         if constexpr(std::is_same<typename P::output_type, void>::value)
         {
-            while (next.is_open())
+            bool is_open = next.is_open();
+            std::list<O> output_buffer;
+            while (is_open)
             {
-                auto content = input_();
-                if (content.has_value())
+                std::list<O> content = read();
+                if (content.size() > 0)
                 {
-                    next.consume(
-                        static_cast<T*>(this)->transform(std::move(*content)));
+                    output_buffer.splice(output_buffer.end(), content);
+                    while (output_buffer.size() >= P::input_size)
+                    {
+                        std::list<O> sized_output;
+                        for (std::size_t i = 0; i < P::input_size; ++i)
+                        {
+                            sized_output.splice(sized_output.end(),
+                                output_buffer, output_buffer.begin());
+                        }
+                        next.consume(std::move(sized_output));
+                        is_open = next.is_open();
+                        if (!is_open)
+                        {
+                            break;
+                        }
+                    }
                 }
                 else
                 {
@@ -32,36 +48,55 @@ public:
     }
 
 private:
-    std::optional<O> read()
+    std::list<O> read()
     {
-        auto content = input_();
-        if (content.has_value())
+        while (input_buffer_.size() < IN)
         {
-            return static_cast<T*>(this)->transform(std::move(*content));
+            std::list<I> content = input_();
+            if (content.size() > 0)
+            {
+                input_buffer_.splice(input_buffer_.end(), std::move(content));
+            }
+            else
+            {
+                return {};
+            }
         }
-        else
+        std::list<O> output;
+        while (input_buffer_.size() >= IN)
         {
-            return {};
+            std::list<I> sized_input;
+            for (std::size_t i = 0; i < IN; ++i)
+            {
+                sized_input.splice(sized_input.end(),
+                    input_buffer_, input_buffer_.begin());
+            }
+            output.splice(output.end(), static_cast<T*>(this)->transform(
+                std::move(sized_input)));
         }
+        return output;
     }
 
 private:
     using output_type = O;
-    std::function<std::optional<I>()> input_;
-    template<class TT, class II, class OO> friend class pipe;
+    static const std::size_t input_size = IN;
+    std::function<std::list<I>()> input_;
+    std::list<I> input_buffer_;
+    template<class TT, class II, std::size_t IIN, class OO> friend class pipe;
 };
 
-template<class T, class I>
-class pipe<T, I, void>
+template<class T, class I, std::size_t IN>
+class pipe<T, I, IN, void>
 {
 private:
     using output_type = void;
-    std::function<std::optional<I>()> input_;
-    template<class TT, class II, class OO> friend class pipe;
+    static const std::size_t input_size = IN;
+    std::function<std::list<I>()> input_;
+    template<class TT, class II, std::size_t IIN, class OO> friend class pipe;
 };
 
 template<class T, class O>
-class pipe<T, void, O>
+class pipe<T, void, 0, O>
 {
 public:
     template<class P>
@@ -69,12 +104,29 @@ public:
     {
         if constexpr(std::is_same<typename P::output_type, void>::value)
         {
-            while (next.is_open())
+            bool is_open = next.is_open();
+            std::list<O> output_buffer;
+            while (is_open)
             {
-                std::optional<O> content = static_cast<T*>(this)->produce();
-                if (content.has_value())
+                std::list<O> content = read();
+                if (content.size() > 0)
                 {
-                    next.consume(std::move(*content));
+                    output_buffer.splice(output_buffer.end(), content);
+                    while (output_buffer.size() >= P::input_size)
+                    {
+                        std::list<O> sized_output;
+                        for (std::size_t i = 0; i < P::input_size; ++i)
+                        {
+                            sized_output.splice(sized_output.end(),
+                                output_buffer, output_buffer.begin());
+                        }
+                        next.consume(std::move(sized_output));
+                        is_open = next.is_open();
+                        if (!is_open)
+                        {
+                            break;
+                        }
+                    }
                 }
                 else
                 {
@@ -91,11 +143,11 @@ public:
 
 private:
     using output_type = O;
-    std::optional<O> read()
+    std::list<O> read()
     {
         return static_cast<T*>(this)->produce();
     }
 };
 
-template<class T>
-class pipe<T, void, void>;
+template<class T, std::size_t IN>
+class pipe<T, void, IN, void>;

@@ -1,34 +1,35 @@
-#include <iostream>
-
 #include "pipe.hpp"
 
-class numbers : public pipe<numbers, void, int>
+class numbers : public pipe<numbers, void, 0, int>
 {
 public:
-    std::optional<int> produce()
+    std::list<int> produce()
     {
-        if (index_ < 4)
+        if (index_ < 6)
         {
-            return index_++;
+            return {index_++};
         }
         return {};
     }
 
 private:
-    std::size_t index_ = 0;
+    int index_ = 0;
 };
 
-class writer : public pipe<writer, int, void>
+class writer : public pipe<writer, int, 3, void>
 {
 public:
     bool is_open()
     {
         return index_ < 10;
     }
-    void consume(int&& content)
+    void consume(std::list<int>&& content)
     {
         ++index_;
-        results_.push_back(content);
+        for (auto& item : content)
+        {
+            results_.push_back(std::move(item));
+        }
     }
     std::vector<int> results_;
 
@@ -36,12 +37,16 @@ private:
     std::size_t index_ = 0;
 };
 
-class doubler : public pipe<doubler, int, int>
+class doubler : public pipe<doubler, int, 2, int>
 {
 public:
-    int transform(int&& content)
+    std::list<int> transform(std::list<int>&& content)
     {
-        return content * 2;
+        for (auto& item : content)
+        {
+            item *= 2;
+        }
+        return content;
     }
 };
 
@@ -51,7 +56,7 @@ int main(int argc, const char* argv[])
     doubler d;
     writer w;
     n | d | w;
-    if (w.results_.size() != 4)
+    if (w.results_.size() != 6)
     {
         return -1;
     }
